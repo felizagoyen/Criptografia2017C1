@@ -20,12 +20,18 @@
 #define MASK_BIT_21_R3   0x200000 //BIT 21
 #define MASK_BIT_22_R3   0x400000 //BIT 22
 
-unsigned long r1 = 0, r2 = 0, r3 = 0;
+unsigned long r1, r2, r3;
+unsigned long key22 = 0x3AB3CB;
 
+void encriptedImage(FILE *file, char * destinationFile);
+void convertFileInBits(unsigned char *buffer, unsigned long fileLength, unsigned char *fileInBits);
+void runA5(int frameCounter);
 void shift64Clock();
-void shift22Clock();
+void shift22Clock(int frameCounter);
+void shiftAllWithKey(unsigned long key, unsigned char maskKey);
 void shift100Clock();
 void generateKeyStream();
+void shiftAllWithoutKey();
 void shiftR1WihoutKey();
 void shiftR2WihoutKey();
 void shiftR3WihoutKey();
@@ -35,61 +41,130 @@ void shiftR3(unsigned char key, unsigned char maskKey);
 unsigned char bitValue(unsigned long r, unsigned long mask);
 unsigned char majority();
 unsigned char keystream[228];
-void encriptedImage();
 
-int main() {
-  shift64Clock(); //Revisar el R3
-  shift22Clock();
-  shift100Clock();
-  generateKeyStream();
-  encriptedImage();
+int main(int argc, char *argv[]) {
+  if (argc != 3) {
+    printf("Missing arguments.\n\nUsage %s sourceFile.bmp destinationFile.bmp\n", argv[0]);
+    return -1;
+  }
+
+  FILE *file = fopen(argv[1], "r");
+  if(file == 0) {
+    printf("Could not open %s file", argv[1]);
+    return -1;
+  }
+
+  encriptedImage(file, argv[2]);
+
   return 0;
 }
 
-void shift64Clock() {
-  unsigned char key64[8] = {0x4E, 0x2F, 0x4D, 0x7C, 0x1E, 0xB8, 0x8B, 0x3A};
-  unsigned char p;
-  for(int x = 0; x < 64; x++) {
-    if(x % 8 == 0) p = key64[x/8];
-    shiftR1(p, 128);
-    shiftR2(p, 128);
-    shiftR3(p, 128);
-    p = p << 1;
+void encriptedImage(FILE *file, char * destinationFile) {
+  unsigned char *buffer, *fileInBits;
+  int frameCounter = 0, bitCounter = 0; 
+  unsigned char byte;
+  unsigned long fileLength;
+  
+  fseek(file, 0, SEEK_END);
+  fileLength = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  buffer = (unsigned char *) malloc(fileLength + 1);
+  fread(buffer, fileLength, sizeof(unsigned char), file);
+  fclose(file);  
+
+  fileInBits = (unsigned char *) malloc(fileLength*8);
+  convertFileInBits(buffer, fileLength, fileInBits);
+
+  free(buffer);
+
+  if((file = fopen(destinationFile, "w")) == 0) {
+    printf("Could not open %s file", destinationFile);
+    exit(-1);
+  }
+
+  runA5(frameCounter);
+ 
+  for(int x = 0; x < fileLength; x++) {
+  	byte = 0;
+    if (x > 33)
+      for(int y = 0; y < 8; y++) {
+        byte = byte >> 1;
+        byte += ((fileInBits[x*8+y] ^ keystream[bitCounter]) * 128);
+        bitCounter++;
+        if(bitCounter == 228) {
+          runA5(++frameCounter);
+          bitCounter = 0;
+        }
+      }
+    else
+      for(int y = 0; y < 8; y++) {
+        byte = byte >> 1;	 
+        byte += (fileInBits[x*8+y] * 128);
+      }
+
+    fwrite(&byte, 1, sizeof(byte), file);
+  }
+  free(fileInBits);
+  fclose(file);
+}
+
+void convertFileInBits(unsigned char *buffer, unsigned long fileLength, unsigned char *fileInBits) {
+  for(int x = 0; x < fileLength; x++) {
+    for(int y = 7; y >= 0; y--) {
+      fileInBits[x*8+y] = bitValue(buffer[x], 0x80);
+      buffer[x] = buffer[x] << 1;
+    }
   }
 }
 
-void shift22Clock() {
-  unsigned long key22 = 0x3AB3CB;
+void runA5(int frameCounter) {
+  shift64Clock();
+  shift22Clock(frameCounter);
+  shift100Clock();
+  generateKeyStream();
+}
+
+void shift64Clock() {
+  r1 = r2 = r3 = 0;
+  unsigned char key64[8] = {0x4E, 0x2F, 0x4D, 0x7C, 0x1E, 0xB8, 0x8B, 0x3A};
+  for(int x = 0; x < 64; x++) {
+    shiftAllWithKey(key64[x/8], 0x80);
+    key64[x/8] = key64[x/8] << 1;
+  }
+}
+
+void shift22Clock(int frameCounter) {
+  key22+=frameCounter;
   for(int x = 0; x < 22; x++) { 
-    if(x > 1) {
-      shiftR1(key22, 1);
-      shiftR2(key22, 1);
-      shiftR3(key22, 1);
-    }
+    shiftAllWithKey(key22, 0x01);
     key22 = key22 >> 1;
   }
 }
 
+void shiftAllWithKey(unsigned long key, unsigned char maskKey) {
+  shiftR1(key, maskKey);
+  shiftR2(key, maskKey);
+  shiftR3(key, maskKey);
+}
+
 void shift100Clock() {
-  unsigned char m;
-  for(int x = 0; x < 100; x++) { 
-    m = majority();
-    if(bitValue(r1, MASK_CLOCK_R1) == m) shiftR1WihoutKey();
-    if(bitValue(r2, MASK_CLOCK_R2) == m) shiftR2WihoutKey();
-    if(bitValue(r3, MASK_CLOCK_R3) == m) shiftR3WihoutKey();
-  }
+  for(int x = 0; x < 100; x++) shiftAllWithoutKey();
 }
 
 void generateKeyStream() {
-  unsigned char k, m;
   for(int x = 0; x < 229; x++) {
     unsigned char bit = bitValue(r1, MASK_BIT_18_R1) ^ bitValue(r2, MASK_BIT_21_R2) ^ bitValue(r3, MASK_BIT_22_R3);
     keystream[x] = bit;
-    m = majority();
-    if(bitValue(r1, MASK_CLOCK_R1) == m) shiftR1WihoutKey();
-    if(bitValue(r2, MASK_CLOCK_R2) == m) shiftR2WihoutKey();
-    if(bitValue(r3, MASK_CLOCK_R3) == m) shiftR3WihoutKey();
+    shiftAllWithoutKey();
   }
+}
+
+void shiftAllWithoutKey() {
+  unsigned char m = majority();
+  if(bitValue(r1, MASK_CLOCK_R1) == m) shiftR1WihoutKey();
+  if(bitValue(r2, MASK_CLOCK_R2) == m) shiftR2WihoutKey();
+  if(bitValue(r3, MASK_CLOCK_R3) == m) shiftR3WihoutKey();
 }
 
 void shiftR1(unsigned char key, unsigned char maskKey) {
@@ -140,56 +215,4 @@ unsigned char majority() {
   if(c1 == c2) return c1;
   if(c1 == c3) return c1;
   return c2;
-}
-
-void encriptedImage() {
-  FILE *file;
-  unsigned char *buffer;
-  unsigned long fileLen;
-
-  file = fopen("imagen.bmp", "r");
-  
-  fseek(file, 0, SEEK_END);
-  fileLen=ftell(file);
-  fseek(file, 0, SEEK_SET);
-
-  buffer=(unsigned char *)malloc(fileLen+1);
-  fread(buffer,fileLen,sizeof(unsigned char),file);
-  fclose(file);  
-  
-  unsigned char v[(fileLen*8)];
-
-  for(int x = 0; x < fileLen; x++) {
-  	unsigned char p = buffer[x];
-  	for(int y = 7; y >= 0; y--) {
-  		v[x*8+y] = bitValue(p, 0x80);
-  		p = p << 1;
-  	}
-  }
-
-  file = fopen("imagen-enc.bmp", "w");
-
-  unsigned char byte;
-  int k = 0; 
-  for(int x = 0; x < fileLen; x++) {
-  	byte = 0;
-    if (x > 33)
-      for(int y = 0; y < 8; y++) {
-        byte = byte >> 1;
-        byte += ((v[x*8+y] ^ keystream[k]) * 128);
-        k++;
-        if(k == 228) k = 0;
-      }
-    else
-      for(int y = 0; y < 8; y++) {
-        byte = byte >> 1;	 
-        byte += (v[x*8+y] * 128);
-      }
-
-    fwrite(&byte, 1, sizeof(byte), file);
-  }
-
-  free(buffer);
-  
-  fclose(file);
 }
