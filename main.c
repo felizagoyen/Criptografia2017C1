@@ -26,8 +26,9 @@ unsigned long key22 = 0x3AB3CB;
 void encryptImage(char *sourceFile, char *destinationFile);
 FILE *openFile(char *path, const char *mode);
 unsigned long getFileLength(FILE *file);
+int getInformationStart(FILE *file);
 void convertFileInBits(FILE *file, unsigned long fileLength, unsigned char *fileInBits);
-void writeEncriptedFile(FILE *file, unsigned long fileLength, unsigned char *fileInBits);
+void writeEncriptedFile(FILE *file, unsigned long fileLength, int informationStart, unsigned char *fileInBits);
 void runA5(int frameCounter);
 void shift64Clock();
 void shift22Clock(int frameCounter);
@@ -60,13 +61,15 @@ void encryptImage(char *sourceFile, char *destinationFile) {
   FILE *file = openFile(sourceFile, "r");
   
   unsigned long fileLength = getFileLength(file);
+  int informationStart = getInformationStart(file);
+
   unsigned char *fileInBits = (unsigned char *) malloc(fileLength*8);
   convertFileInBits(file, fileLength, fileInBits);
 
   fclose(file);
 
   file = openFile(destinationFile, "w");
-  writeEncriptedFile(file, fileLength, fileInBits);
+  writeEncriptedFile(file, fileLength, informationStart, fileInBits);
 
   free(fileInBits);
   fclose(file);
@@ -102,14 +105,22 @@ unsigned long getFileLength(FILE *file) {
   return fileLength;
 }
 
-void writeEncriptedFile(FILE *file, unsigned long fileLength, unsigned char *fileInBits) {
+int getInformationStart(FILE *file) {
+  int informationStart = 0;
+  fseek(file, 10, SEEK_SET);
+  fread(&informationStart, 1, 4, file);
+  fseek(file, 0, SEEK_SET);
+  return informationStart;
+}
+
+void writeEncriptedFile(FILE *file, unsigned long fileLength, int informationStart, unsigned char *fileInBits) {
   unsigned char byte;
   int frameCounter = 0, bitCounter = 0;
   runA5(frameCounter);
  
   for(int x = 0; x < fileLength; x++) {
   	byte = 0;
-    if (x > 33)
+    if (x > informationStart)
       for(int y = 0; y < 8; y++) {
         byte = byte >> 1;
         byte += ((fileInBits[x*8+y] ^ keystream[bitCounter]) * 128);
