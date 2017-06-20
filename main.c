@@ -23,8 +23,11 @@
 unsigned long r1, r2, r3;
 unsigned long key22 = 0x3AB3CB;
 
-void encriptedImage(FILE *file, char * destinationFile);
-void convertFileInBits(unsigned char *buffer, unsigned long fileLength, unsigned char *fileInBits);
+void encryptImage(char *sourceFile, char *destinationFile);
+FILE *openFile(char *path, const char *mode);
+unsigned long getFileLength(FILE *file);
+void convertFileInBits(FILE *file, unsigned long fileLength, unsigned char *fileInBits);
+void writeEncriptedFile(FILE *file, unsigned long fileLength, unsigned char *fileInBits);
 void runA5(int frameCounter);
 void shift64Clock();
 void shift22Clock(int frameCounter);
@@ -48,41 +51,60 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  FILE *file = fopen(argv[1], "r");
-  if(file == 0) {
-    printf("Could not open %s file", argv[1]);
-    return -1;
-  }
-
-  encriptedImage(file, argv[2]);
+  encryptImage(argv[1], argv[2]);
 
   return 0;
 }
 
-void encriptedImage(FILE *file, char * destinationFile) {
-  unsigned char *buffer, *fileInBits;
-  int frameCounter = 0, bitCounter = 0; 
-  unsigned char byte;
-  unsigned long fileLength;
+void encryptImage(char *sourceFile, char *destinationFile) {
+  FILE *file = openFile(sourceFile, "r");
   
-  fseek(file, 0, SEEK_END);
-  fileLength = ftell(file);
-  fseek(file, 0, SEEK_SET);
+  unsigned long fileLength = getFileLength(file);
+  unsigned char *fileInBits = (unsigned char *) malloc(fileLength*8);
+  convertFileInBits(file, fileLength, fileInBits);
 
-  buffer = (unsigned char *) malloc(fileLength + 1);
-  fread(buffer, fileLength, sizeof(unsigned char), file);
-  fclose(file);  
+  fclose(file);
 
-  fileInBits = (unsigned char *) malloc(fileLength*8);
-  convertFileInBits(buffer, fileLength, fileInBits);
+  file = openFile(destinationFile, "w");
+  writeEncriptedFile(file, fileLength, fileInBits);
 
-  free(buffer);
+  free(fileInBits);
+  fclose(file);
+}
 
-  if((file = fopen(destinationFile, "w")) == 0) {
-    printf("Could not open %s file", destinationFile);
+FILE *openFile(char *path, const char *mode) {
+  FILE *file = fopen(path, mode);
+  if(!file) {
+    printf("Could not open %s file.\n", path);
     exit(-1);
   }
+  return file;
+}
 
+void convertFileInBits(FILE *file, unsigned long fileLength, unsigned char *fileInBits) {
+  unsigned char *buffer = (unsigned char *) malloc(fileLength + 1);
+  fread(buffer, fileLength, sizeof(unsigned char), file);
+
+  for(int x = 0; x < fileLength; x++) {
+    for(int y = 7; y >= 0; y--) {
+      fileInBits[x*8+y] = bitValue(buffer[x], 0x80);
+      buffer[x] = buffer[x] << 1;
+    }
+  }
+
+  free(buffer);
+}
+
+unsigned long getFileLength(FILE *file) {
+  fseek(file, 0, SEEK_END);
+  unsigned long fileLength = ftell(file);
+  fseek(file, 0, SEEK_SET);
+  return fileLength;
+}
+
+void writeEncriptedFile(FILE *file, unsigned long fileLength, unsigned char *fileInBits) {
+  unsigned char byte;
+  int frameCounter = 0, bitCounter = 0;
   runA5(frameCounter);
  
   for(int x = 0; x < fileLength; x++) {
@@ -104,17 +126,6 @@ void encriptedImage(FILE *file, char * destinationFile) {
       }
 
     fwrite(&byte, 1, sizeof(byte), file);
-  }
-  free(fileInBits);
-  fclose(file);
-}
-
-void convertFileInBits(unsigned char *buffer, unsigned long fileLength, unsigned char *fileInBits) {
-  for(int x = 0; x < fileLength; x++) {
-    for(int y = 7; y >= 0; y--) {
-      fileInBits[x*8+y] = bitValue(buffer[x], 0x80);
-      buffer[x] = buffer[x] << 1;
-    }
   }
 }
 
